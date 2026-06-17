@@ -1,0 +1,12 @@
+langchain
+langchain-community
+langchain-huggingface
+chromadb
+pypdf
+sentence-transformers
+gradio
+langgraph
+langchain-google-genai
+langchain-nvidia-ai-endpoints
+langchain-groq
+python-dotenv
