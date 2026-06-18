@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 /chroma_db
 .claude
+/scrapper/__pycache__
+/.auth
