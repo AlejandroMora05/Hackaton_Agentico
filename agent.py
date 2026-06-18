@@ -77,14 +77,25 @@ class AgentState(TypedDict):
     academic_context: Optional[dict]
 
 # ── 5. Detección de intención de notas ───────────────────────────────────────
-_GRADES_KEYWORDS = [
-    "notas", "nota", "calificacion", "calificaciones",
-    "como voy", "cómo voy", "mis materias", "rendimiento",
-    "definitiva", "acumulada", "porcentaje evaluado",
-    "perder materia", "ganar materia", "perdiendo", "ganando",
-    "cuanto saque", "cuánto saqué", "cuanto llevo", "cuánto llevo",
-    "ver notas", "consultar notas", "mis notas",
+import re
+
+# Frases exactas que indican explícitamente que el usuario quiere ver sus notas
+_GRADES_PHRASES = [
+    "mis notas", "ver notas", "consultar notas", "ver mis notas",
+    "mis calificaciones", "ver calificaciones", "consultar calificaciones",
+    "como voy", "cómo voy", "cuanto saque", "cuánto saqué",
+    "cuanto llevo", "cuánto llevo", "mi rendimiento académico",
+    "perder materia", "ganar materia", "perdiendo la materia", "ganando la materia",
+    "nota acumulada", "nota definitiva", "porcentaje evaluado",
+    # Preguntas sobre estado personal en materias
+    "materia perdida", "materias perdidas", "tengo perdida", "tengo alguna perdida",
+    "voy perdiendo", "voy ganando", "estoy perdiendo", "estoy ganando",
+    "perdi alguna", "perdí alguna", "tengo reprobada", "tengo alguna reprobada",
+    "mis materias", "en mis materias",
 ]
+
+# Palabras clave que solo activan si aparecen como palabra completa Y sin contexto de reglamento
+_GRADES_WHOLE_WORDS = ["calificacion", "calificaciones"]
 
 _NEXT_SEMESTER_KEYWORDS = [
     "proximo semestre", "próximo semestre", "siguiente semestre",
@@ -97,7 +108,13 @@ _NEXT_SEMESTER_KEYWORDS = [
 
 def _is_grades_question(question: str) -> bool:
     q = question.lower()
-    return any(kw in q for kw in _GRADES_KEYWORDS)
+    if any(phrase in q for phrase in _GRADES_PHRASES):
+        return True
+    # Palabra completa con word boundary para evitar falsos positivos
+    for word in _GRADES_WHOLE_WORDS:
+        if re.search(rf"\b{word}\b", q):
+            return True
+    return False
 
 def _is_next_semester_question(question: str) -> bool:
     q = question.lower()
