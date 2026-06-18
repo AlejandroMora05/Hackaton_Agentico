@@ -139,6 +139,8 @@ def parse_grades_html(html: str) -> Dict:
     for card in soup.select(".pt-3 > .card"):
         header = card.find("div", class_="card-header")
         nombre_materia = header.get_text(strip=True) if header else "Materia"
+        codigo_match = re.match(r"^\[(\d+)\]", nombre_materia)
+        codigo = codigo_match.group(1) if codigo_match else None
 
         evaluaciones = []
         table = card.find("table")
@@ -174,6 +176,7 @@ def parse_grades_html(html: str) -> Dict:
         estado = compute_status(porcentaje_evaluado, nota_acumulada, nota_definitiva)
 
         materias.append({
+            "codigo": codigo,
             "nombre": nombre_materia,
             "evaluaciones": evaluaciones,
             "porcentaje_evaluado": porcentaje_evaluado,

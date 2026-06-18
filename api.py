@@ -7,7 +7,15 @@ from pydantic import BaseModel
 from typing import List
 import uvicorn
 from agent import ask
-from scrapper.grades import get_grades_report, LoginTimeoutError
+from scrapper.login_session import (
+    NotReadyError,
+    SessionNotFoundError,
+    analyze_map,
+    analyze_notas,
+    cancel_session,
+    goto_target,
+    start_session,
+)
 
 app = FastAPI(title="Copiloto UdeA API")
 
@@ -35,14 +43,53 @@ async def chat(req: ChatRequest):
             answer = "Ocurrió un error inesperado. Por favor intenta de nuevo."
         return {"answer": answer, "sources": []}
 
-@app.post("/api/grades")
-async def grades():
+class SessionRequest(BaseModel):
+    session_id: str
+
+# Las dos rutas ("Ver mis notas" y "Ver mi mapa") comparten la misma sesión
+# de login institucional (scrapper/login_session.py): iniciar sesión una vez
+# desde cualquiera de los dos botones sirve para el otro también.
+
+@app.post("/api/session/start")
+async def session_start(target: str):
+    return await start_session(target)
+
+@app.post("/api/session/goto")
+async def session_goto(req: SessionRequest, target: str):
     try:
-        return await run_in_threadpool(get_grades_report)
-    except LoginTimeoutError:
-        return {"error": "No se detectó el inicio de sesión a tiempo. Intenta de nuevo."}
+        await goto_target(req.session_id, target)
+        return {"ok": True}
+    except SessionNotFoundError as e:
+        return {"error": str(e), "session_expired": True}
+    except Exception:
+        return {"error": "No se pudo navegar a esa sección. Intenta de nuevo."}
+
+@app.post("/api/session/cancel")
+async def session_cancel(req: SessionRequest):
+    await cancel_session(req.session_id)
+    return {"ok": True}
+
+@app.post("/api/grades/analyze")
+async def grades_analyze(req: SessionRequest):
+    try:
+        return await analyze_notas(req.session_id)
+    except SessionNotFoundError as e:
+        return {"error": str(e), "session_expired": True}
+    except NotReadyError as e:
+        return {"error": str(e)}
     except Exception:
         return {"error": "Ocurrió un error al consultar tus notas. Intenta de nuevo."}
+
+@app.post("/api/map/analyze")
+async def map_analyze(req: SessionRequest):
+    try:
+        return await analyze_map(req.session_id)
+    except SessionNotFoundError as e:
+        return {"error": str(e), "session_expired": True}
+    except NotReadyError as e:
+        return {"error": str(e)}
+    except Exception:
+        return {"error": "Ocurrió un error al analizar tu información. Intenta de nuevo."}
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
