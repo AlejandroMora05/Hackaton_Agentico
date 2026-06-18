@@ -5,13 +5,16 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_community.retrievers import BM25Retriever
+from langchain_classic.retrievers import EnsembleRetriever
+from langchain_core.documents import Document
 from langgraph.graph import StateGraph, START, END
 from typing import TypedDict, List
 from llm_factory import get_llm
 
 load_dotenv()
 
-# ── 1. Cargar vectorstore ─────────────────────────────────────────────────────
+# ── 1. Cargar vectorstore y retriever híbrido (BM25 + vectores) ───────────────
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 )
@@ -19,7 +22,22 @@ vectorstore = Chroma(
     persist_directory="./chroma_db",
     embedding_function=embeddings
 )
-retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+
+# Reconstruye los documentos desde Chroma para alimentar BM25
+_data = vectorstore.get(include=["documents", "metadatas"])
+_all_docs = [
+    Document(page_content=text, metadata=meta)
+    for text, meta in zip(_data["documents"], _data["metadatas"])
+]
+
+bm25_retriever = BM25Retriever.from_documents(_all_docs, k=6)
+vector_retriever = vectorstore.as_retriever(search_kwargs={"k": 6})
+
+# 50% peso a cada uno; EnsembleRetriever deduplica resultados automáticamente
+retriever = EnsembleRetriever(
+    retrievers=[bm25_retriever, vector_retriever],
+    weights=[0.5, 0.5]
+)
 
 # ── 2. LLM ────────────────────────────────────────────────────────────────────
 llm = get_llm()  # usa LLM_PROVIDER del .env

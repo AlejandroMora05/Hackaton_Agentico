@@ -1,7 +1,7 @@
 # ingest.py
 import os
 from dotenv import load_dotenv
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -19,7 +19,7 @@ def load_pdfs(path: str):
 
     for filename in archivos:
         full_path = os.path.join(path, filename)
-        loader = PyPDFLoader(full_path)
+        loader = PyMuPDFLoader(full_path)
         pages = loader.load()
         all_docs.extend(pages)
         print(f" {filename}: {len(pages)} páginas cargadas")
@@ -30,8 +30,8 @@ def load_pdfs(path: str):
 # ── 2. Dividir en chunks ──────────────────────────────────────────────────────
 def split_docs(docs):
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=100,
+        chunk_size=1500,
+        chunk_overlap=200,
         separators=["\n\n", "\n", ".", " "]
     )
     chunks = splitter.split_documents(docs)

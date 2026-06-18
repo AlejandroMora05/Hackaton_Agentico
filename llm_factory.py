@@ -17,7 +17,7 @@ def get_llm(provider: str = None):
     elif provider == "nvidia":
         from langchain_nvidia_ai_endpoints import ChatNVIDIA
         return ChatNVIDIA(
-            model="nvidia/llama-3.1-nemotron-super-49b-v1",
+            model="meta/llama-3.3-70b-instruct",
             nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
             temperature=0.2
         )
