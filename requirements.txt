@@ -11,3 +11,6 @@ langchain-google-genai
 langchain-nvidia-ai-endpoints
 langchain-groq
 python-dotenv
+beautifulsoup4
+playwright
+rank_bm25
