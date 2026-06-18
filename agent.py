@@ -68,6 +68,7 @@ prompt = ChatPromptTemplate.from_messages([
 # ── 4. Estado del grafo ───────────────────────────────────────────────────────
 class AgentState(TypedDict):
     question: str
+    search_query: str
     history: List[dict]
     context: str
     answer: str
@@ -128,10 +129,29 @@ def get_grades(state: AgentState) -> AgentState:
     return {**state, "answer": answer, "sources": [], "grades_mode": True}
 
 # ── 7. Nodos RAG ──────────────────────────────────────────────────────────────
+_REWRITE_PROMPT = """Tienes una pregunta de un estudiante de la Universidad de Antioquia.
+
+Si la pregunta está relacionada con el reglamento estudiantil, matrícula, sanciones, calidad de estudiante, procesos académicos o administrativos de la universidad, reformúlala usando vocabulario técnico y formal del reglamento (términos como: causal, sanción, expulsión, matrícula, calidad de estudiante, cancelación, período académico, rendimiento, disciplinario).
+
+Si la pregunta NO está relacionada con la universidad ni su reglamento, devuélvela EXACTAMENTE igual, sin cambios.
+
+Devuelve ÚNICAMENTE la pregunta (reformulada o igual), sin explicaciones ni comillas.
+
+Pregunta: {question}"""
+
+def rewrite_query(state: AgentState) -> AgentState:
+    """Reformula la pregunta del usuario en lenguaje documental para mejorar el retrieval."""
+    print(" Reescribiendo query...")
+    response = llm.invoke(_REWRITE_PROMPT.format(question=state["question"]))
+    rewritten = response.content.strip()
+    print(f"   original : {state['question']}")
+    print(f"   reescrita: {rewritten}")
+    return {**state, "search_query": rewritten}
+
 def retrieve(state: AgentState) -> AgentState:
     """Busca fragmentos relevantes en el vectorstore."""
     print(" Buscando en documentos...")
-    docs = retriever.invoke(state["question"])
+    docs = retriever.invoke(state["search_query"])
 
     context = "\n\n".join([doc.page_content for doc in docs])
     sources = list(set([
@@ -164,11 +184,13 @@ def build_agent():
     graph = StateGraph(AgentState)
 
     graph.add_node("get_grades", get_grades)
+    graph.add_node("rewrite_query", rewrite_query)
     graph.add_node("retrieve", retrieve)
     graph.add_node("generate", generate)
 
-    graph.add_conditional_edges(START, _route_intent, {"grades": "get_grades", "rag": "retrieve"})
+    graph.add_conditional_edges(START, _route_intent, {"grades": "get_grades", "rag": "rewrite_query"})
     graph.add_edge("get_grades", END)
+    graph.add_edge("rewrite_query", "retrieve")
     graph.add_edge("retrieve", "generate")
     graph.add_edge("generate", END)
 
@@ -180,6 +202,7 @@ agent = build_agent()
 def ask(question: str, history: list = None) -> dict:
     result = agent.invoke({
         "question": question,
+        "search_query": "",
         "history": history or [],
         "context": "",
         "answer": "",
