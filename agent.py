@@ -9,7 +9,7 @@ from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
 from langchain_core.documents import Document
 from langgraph.graph import StateGraph, START, END
-from typing import TypedDict, List
+from typing import TypedDict, List, Optional
 from llm_factory import get_llm
 
 load_dotenv()
@@ -72,8 +72,62 @@ class AgentState(TypedDict):
     context: str
     answer: str
     sources: List[str]
+    grades_mode: bool
 
-# ── 5. Nodos del grafo ────────────────────────────────────────────────────────
+# ── 5. Detección de intención de notas ───────────────────────────────────────
+_GRADES_KEYWORDS = [
+    "notas", "nota", "calificacion", "calificaciones",
+    "como voy", "cómo voy", "mis materias", "rendimiento",
+    "definitiva", "acumulada", "porcentaje evaluado",
+    "perder materia", "ganar materia", "perdiendo", "ganando",
+    "cuanto saque", "cuánto saqué", "cuanto llevo", "cuánto llevo",
+    "ver notas", "consultar notas", "mis notas",
+]
+
+def _is_grades_question(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in _GRADES_KEYWORDS)
+
+def _route_intent(state: AgentState) -> str:
+    return "grades" if _is_grades_question(state["question"]) else "rag"
+
+# ── 6. Nodo de notas (Playwright) ─────────────────────────────────────────────
+def _format_grades(report: dict) -> str:
+    lines = [
+        f"Aquí están tus notas, **{report.get('estudiante', '')}**:",
+        f"*{report.get('programa', '')} — Semestre {report.get('semestre', '')}*",
+        "",
+    ]
+    for m in report.get("materias", []):
+        icon = {"green": "✅", "orange": "⚠️", "red": "❌"}.get(m.get("color"), "•")
+        lines.append(f"{icon} **{m['nombre']}**")
+        lines.append(f"   {m['mensaje']}")
+        acum = m.get("nota_acumulada")
+        pct = m.get("porcentaje_evaluado")
+        if acum is not None:
+            lines.append(f"   Nota acumulada: **{acum}** | Evaluado: **{pct}%**")
+        if m.get("nota_definitiva") is not None:
+            lines.append(f"   Nota definitiva: **{m['nota_definitiva']}**")
+        lines.append("")
+    return "\n".join(lines)
+
+def get_grades(state: AgentState) -> AgentState:
+    """Abre el navegador, espera login y devuelve el reporte de notas."""
+    from scrapper.grades import get_grades_report, LoginTimeoutError
+    print(" Abriendo navegador para consultar notas...")
+    try:
+        report = get_grades_report()
+        answer = _format_grades(report)
+    except LoginTimeoutError:
+        answer = (
+            "⏱️ No completaste el inicio de sesión a tiempo. "
+            "Por favor intenta de nuevo y accede al portal antes de que pase el tiempo."
+        )
+    except Exception as e:
+        answer = f"Ocurrió un error al consultar tus notas: {e}"
+    return {**state, "answer": answer, "sources": [], "grades_mode": True}
+
+# ── 7. Nodos RAG ──────────────────────────────────────────────────────────────
 def retrieve(state: AgentState) -> AgentState:
     """Busca fragmentos relevantes en el vectorstore."""
     print(" Buscando en documentos...")
@@ -105,14 +159,16 @@ def generate(state: AgentState) -> AgentState:
     })
     return {**state, "answer": response.content}
 
-# ── 6. Construir el grafo ─────────────────────────────────────────────────────
+# ── 8. Construir el grafo ─────────────────────────────────────────────────────
 def build_agent():
     graph = StateGraph(AgentState)
 
+    graph.add_node("get_grades", get_grades)
     graph.add_node("retrieve", retrieve)
     graph.add_node("generate", generate)
 
-    graph.add_edge(START, "retrieve")
+    graph.add_conditional_edges(START, _route_intent, {"grades": "get_grades", "rag": "retrieve"})
+    graph.add_edge("get_grades", END)
     graph.add_edge("retrieve", "generate")
     graph.add_edge("generate", END)
 
@@ -120,14 +176,15 @@ def build_agent():
 
 agent = build_agent()
 
-# ── 7. Función pública para usar desde la interfaz ───────────────────────────
+# ── 9. Función pública para usar desde la interfaz ───────────────────────────
 def ask(question: str, history: list = None) -> dict:
     result = agent.invoke({
         "question": question,
         "history": history or [],
         "context": "",
         "answer": "",
-        "sources": []
+        "sources": [],
+        "grades_mode": False,
     })
     return {
         "answer": result["answer"],
