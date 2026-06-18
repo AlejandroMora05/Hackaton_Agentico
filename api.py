@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import uvicorn
 from agent import ask
 from scrapper.login_session import (
@@ -29,11 +29,12 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     question: str
     history: List[dict] = []
+    academic_context: Optional[dict] = None
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     try:
-        result = await run_in_threadpool(ask, req.question, req.history)
+        result = await run_in_threadpool(ask, req.question, req.history, req.academic_context)
         return result
     except Exception as e:
         msg = str(e)

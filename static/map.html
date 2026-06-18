@@ -25,8 +25,31 @@
       30%            { transform: translateY(-8px); opacity: 1; }
     }
 
-    .materia-box { width: 200px; }
-    .nivel-col { width: 200px; }
+    .materia-box {
+      width: 200px;
+      position: relative;
+      z-index: 1;
+      cursor: pointer;
+      transition: box-shadow .15s, transform .15s, opacity .15s;
+    }
+    .materia-box:hover {
+      box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+      transform: translateY(-1px);
+    }
+    .materia-box.is-selected   { outline: 3px solid #2563eb; outline-offset: 2px; }
+    .materia-box.is-prereq     { outline: 3px solid #f59e0b; outline-offset: 2px; }
+    .materia-box.is-correq     { outline: 3px solid #a855f7; outline-offset: 2px; }
+    .materia-box.is-unlocks    { outline: 3px solid #10b981; outline-offset: 2px; }
+    .materia-box.is-dimmed     { opacity: 0.3; }
+    .nivel-col {
+      width: 200px;
+      position: relative;
+      z-index: 1;
+      padding-right: 16px;
+      border-right: 1px dashed #d8e6dd;
+    }
+    .nivel-col:last-child { border-right: none; padding-right: 0; }
+    #arrows { z-index: 0; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -41,8 +64,18 @@
       <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-green-500 inline-block"></span>Cursando · ganando</span>
       <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-orange-500 inline-block"></span>Cursando · en riesgo</span>
       <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-red-500 inline-block"></span>Cursando · perdiendo</span>
+      <span class="flex items-center gap-1.5"><span class="w-4 h-0 border-t-2 border-dashed border-amber-500 inline-block"></span>Correquisito</span>
     </div>
   </header>
+
+  <div id="selectionHint" class="hidden bg-white border-b border-gray-100 px-6 py-2 flex items-center gap-4 text-xs text-gray-500 flex-wrap">
+    <span>Click en una materia para ver sus relaciones:</span>
+    <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-white inline-block" style="outline:2px solid #2563eb"></span>Seleccionada</span>
+    <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-white inline-block" style="outline:2px solid #f59e0b"></span>Prerrequisito</span>
+    <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-white inline-block" style="outline:2px solid #a855f7"></span>Correquisito</span>
+    <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-white inline-block" style="outline:2px solid #10b981"></span>Desbloquea</span>
+    <button onclick="selectMateria(null)" class="ml-auto text-[#00783A] hover:underline">Limpiar selección</button>
+  </div>
 
   <main id="appRoot" class="p-6">
     <div class="max-w-lg mx-auto bg-white border border-gray-200 rounded-2xl shadow-sm p-6 mt-10 text-center">
@@ -69,11 +102,16 @@
 
     function materiaBoxHtml(m) {
       const c = colorMeta(m.cursando ? m.color : null);
-      const tooltip = m.cursando ? esc(m.mensaje) : '';
+      const tooltipParts = [];
+      if (m.cursando) tooltipParts.push(m.mensaje);
+      if (m.prerequisitos?.length) tooltipParts.push(`Requiere: ${m.prerequisitos.join(', ')}`);
+      if (m.correquisitos?.length) tooltipParts.push(`Correquisito: ${m.correquisitos.join(', ')}`);
+      const tooltip = esc(tooltipParts.join(' · '));
+      const clickable = m.codigo ? `onclick="selectMateria('${m.codigo}')"` : '';
       return `
         <div id="mat-${m.codigo}" data-codigo="${m.codigo}"
-             class="materia-box border ${c.border} ${c.bg} rounded-lg px-2.5 py-2 shadow-sm"
-             title="${tooltip}">
+             class="materia-box border ${c.border} ${c.bg} rounded-xl px-2.5 py-2 shadow-sm"
+             title="${tooltip}" ${clickable}>
           <p class="text-[10px] text-gray-400 leading-none">${esc(m.codigo)} · ${m.creditos ?? '—'} cr</p>
           <p class="text-xs font-medium ${c.text} leading-snug mt-0.5">${esc(m.nombre)}</p>
           ${m.cursando ? `<p class="text-[10px] ${c.text} mt-1 font-semibold">Cursando</p>` : ''}
@@ -81,13 +119,17 @@
     }
 
     function buildGrid(data) {
-      const columns = data.niveles.map(n => `
+      const columns = data.niveles.map(n => {
+        const creditos = n.materias.reduce((acc, m) => acc + (m.creditos ?? 0), 0);
+        return `
         <div class="nivel-col flex flex-col gap-3 flex-shrink-0">
-          <div class="text-center bg-[#00783A] text-white text-xs font-semibold rounded-md py-1.5">
+          <div class="text-center bg-[#00783A] text-white text-xs font-semibold rounded-md py-1.5 leading-tight">
             Nivel ${n.nivel}
+            <span class="block text-[10px] font-normal text-green-200">${creditos} créditos</span>
           </div>
           ${n.materias.map(materiaBoxHtml).join('')}
-        </div>`).join('');
+        </div>`;
+      }).join('');
 
       return `
         <div id="scrollArea" class="overflow-x-auto pb-4">
@@ -95,7 +137,7 @@
             <div id="grid" class="flex gap-8 items-start relative">
               ${columns}
             </div>
-            <svg id="arrows" class="absolute top-0 left-0 pointer-events-none" style="z-index:0">
+            <svg id="arrows" class="absolute top-0 left-0 pointer-events-none">
               <defs>
                 <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
                   <path d="M0,0 L6,3 L0,6 Z" fill="#9ca3af" />
@@ -162,14 +204,95 @@
 
           const x1 = from.x + from.w, y1 = from.y + from.h / 2;
           const x2 = to.x, y2 = to.y + to.h / 2;
-          const cx1 = x1 + Math.max(30, (x2 - x1) / 3);
-          const cx2 = x2 - Math.max(30, (x2 - x1) / 3);
+          const bend = Math.max(24, Math.abs(x2 - x1) * 0.4);
+          const cx1 = x1 + bend;
+          const cx2 = x2 - bend;
 
-          paths.push(`<path d="M${x1},${y1} C${cx1},${y1} ${cx2},${y2} ${x2},${y2}" fill="none" stroke="#cbd5e1" stroke-width="1.5" marker-end="url(#arrowhead)" />`);
+          paths.push(`<path data-from="${codigoPrereq}" data-to="${m.codigo}" d="M${x1},${y1} C${cx1},${y1} ${cx2},${y2} ${x2},${y2}" fill="none" stroke="#b9c4cf" stroke-width="1.25" opacity="0.85" marker-end="url(#arrowhead)" />`);
+        });
+
+        (m.correquisitos || []).forEach(codigoCoreq => {
+          const fromEl = document.getElementById(`mat-${codigoCoreq}`);
+          const toEl = document.getElementById(`mat-${m.codigo}`);
+          if (!fromEl || !toEl) return;
+
+          const from = rectRelativeToCanvas(fromEl, canvas);
+          const to = rectRelativeToCanvas(toEl, canvas);
+
+          const sameColumn = Math.abs(from.x - to.x) < 5;
+          let x1, y1, x2, y2;
+          if (sameColumn) {
+            const fromIsAbove = from.y < to.y;
+            x1 = from.x + from.w / 2; y1 = fromIsAbove ? from.y + from.h : from.y;
+            x2 = to.x + to.w / 2;     y2 = fromIsAbove ? to.y : to.y + to.h;
+          } else {
+            const fromIsLeft = from.x < to.x;
+            x1 = fromIsLeft ? from.x + from.w : from.x; y1 = from.y + from.h / 2;
+            x2 = fromIsLeft ? to.x : to.x + to.w;        y2 = to.y + to.h / 2;
+          }
+
+          paths.push(`<path data-from="${codigoCoreq}" data-to="${m.codigo}" d="M${x1},${y1} L${x2},${y2}" fill="none" stroke="#f59e0b" stroke-width="1.25" stroke-dasharray="3,3" opacity="0.85" />`);
         });
       });
 
       svg.innerHTML = svg.querySelector('defs').outerHTML + paths.join('');
+    }
+
+    let allMateriasByCode = {};
+    let selectedCodigo = null;
+
+    function buildMateriaIndex(data) {
+      allMateriasByCode = {};
+      data.niveles.forEach(n => n.materias.forEach(m => {
+        if (m.codigo) allMateriasByCode[m.codigo] = m;
+      }));
+    }
+
+    function selectMateria(codigo) {
+      selectedCodigo = (selectedCodigo === codigo) ? null : codigo;
+      applySelectionHighlight();
+    }
+
+    function applySelectionHighlight() {
+      const hint = document.getElementById('selectionHint');
+      const boxes = document.querySelectorAll('.materia-box');
+      const arrowPaths = document.querySelectorAll('#arrows path[data-from]');
+
+      if (!selectedCodigo) {
+        if (hint) hint.classList.add('hidden');
+        boxes.forEach(el => el.classList.remove('is-selected', 'is-prereq', 'is-correq', 'is-unlocks', 'is-dimmed'));
+        arrowPaths.forEach(p => { p.style.opacity = ''; p.style.strokeWidth = ''; });
+        return;
+      }
+
+      if (hint) hint.classList.remove('hidden');
+
+      const materia = allMateriasByCode[selectedCodigo];
+      const prereqs = new Set(materia?.prerequisitos || []);
+      const correqs = new Set(materia?.correquisitos || []);
+      const unlocks = new Set();
+      Object.values(allMateriasByCode).forEach(m => {
+        if ((m.prerequisitos || []).includes(selectedCodigo)) unlocks.add(m.codigo);
+        // los correquisitos solo se registran de un lado en el pénsum, así
+        // que también se incluye la dirección inversa (relación simétrica).
+        if ((m.correquisitos || []).includes(selectedCodigo)) correqs.add(m.codigo);
+      });
+
+      boxes.forEach(el => {
+        const c = el.dataset.codigo;
+        el.classList.remove('is-selected', 'is-prereq', 'is-correq', 'is-unlocks', 'is-dimmed');
+        if (c === selectedCodigo) el.classList.add('is-selected');
+        else if (prereqs.has(c)) el.classList.add('is-prereq');
+        else if (correqs.has(c)) el.classList.add('is-correq');
+        else if (unlocks.has(c)) el.classList.add('is-unlocks');
+        else el.classList.add('is-dimmed');
+      });
+
+      arrowPaths.forEach(p => {
+        const involved = p.dataset.from === selectedCodigo || p.dataset.to === selectedCodigo;
+        p.style.opacity = involved ? '1' : '0.08';
+        p.style.strokeWidth = involved ? '2.25' : '';
+      });
     }
 
     let sessionId = null;
@@ -291,10 +414,19 @@
         document.getElementById('headerInfo').textContent =
           `${data.estudiante} · ${data.programa} · Semestre ${data.semestre}`;
 
+        buildMateriaIndex(data);
+        selectedCodigo = null;
         root.innerHTML = buildGrid(data) + buildElectivas(data);
         requestAnimationFrame(() => drawArrows(data));
         window.addEventListener('resize', () => drawArrows(data));
         sessionId = null;
+
+        // Si esta ventana se abrió desde el chat (window.open), le avisamos
+        // para que pueda responder preguntas sobre el pénsum sin volver a
+        // pedir login.
+        if (window.opener && typeof window.opener.receiveMapReport === 'function') {
+          window.opener.receiveMapReport(data);
+        }
       } catch (e) {
         root.innerHTML = analyzeInstructionsHtml(`<p class="text-sm text-red-600 mt-3">No se pudo conectar con el servidor. Verifica que esté en ejecución.</p>`);
       }

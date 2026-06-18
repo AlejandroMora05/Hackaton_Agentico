@@ -116,13 +116,13 @@
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V9m4 8V5m4 12v-6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/>
         </svg>
-        Ver mis notas
+        <span id="gradesBtnLabel">Ver mis notas</span>
       </button>
       <button onclick="openMapWindow()" class="w-full flex items-center justify-center gap-2 text-xs text-white bg-green-700 hover:bg-green-600 border border-green-600 rounded-lg px-3 py-2 transition-colors">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
         </svg>
-        Ver mi mapa
+        <span id="mapBtnLabel">Ver mi mapa</span>
       </button>
       <button onclick="clearChat()" class="w-full flex items-center justify-center gap-2 text-xs text-green-300 hover:text-white border border-green-700 hover:border-green-500 rounded-lg px-3 py-2 transition-colors">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -264,6 +264,23 @@
 
   <script>
     let llmHistory = [];
+    // Lo que ya se analizó con "Ver mis notas" / "Ver mi mapa", para que el
+    // chat pueda responder sobre notas y pénsum sin volver a abrir el navegador.
+    const academicContext = { grades: null, map: null };
+
+    // "Ver mi mapa" abre map.html en otra ventana; esa ventana llama a esta
+    // función (window.opener.receiveMapReport) cuando termina de analizar.
+    window.receiveMapReport = function (data) {
+      academicContext.map = data;
+      updateContextIndicators();
+    };
+
+    function updateContextIndicators() {
+      const notasBtn = document.getElementById('gradesBtnLabel');
+      const mapaBtn = document.getElementById('mapBtnLabel');
+      if (notasBtn) notasBtn.textContent = academicContext.grades ? 'Ver mis notas ✓' : 'Ver mis notas';
+      if (mapaBtn) mapaBtn.textContent = academicContext.map ? 'Ver mi mapa ✓' : 'Ver mi mapa';
+    }
 
     marked.setOptions({ breaks: true, gfm: true });
 
@@ -361,7 +378,16 @@
     function colorMeta(color) {
       if (color === 'red')    return { border: 'border-red-300',    bg: 'bg-red-50',    text: 'text-red-700',    badge: 'bg-red-500',    label: 'Perdiendo' };
       if (color === 'orange') return { border: 'border-orange-300', bg: 'bg-orange-50', text: 'text-orange-700', badge: 'bg-orange-500', label: 'En riesgo' };
+      if (color === 'gray')   return { border: 'border-gray-300',   bg: 'bg-gray-50',   text: 'text-gray-500',   badge: 'bg-gray-400',   label: 'Sin notas' };
+      if (color === 'gold')   return { border: 'border-amber-300',  bg: 'bg-amber-50',  text: 'text-amber-700',  badge: 'bg-amber-500',  label: 'Excelente' };
       return { border: 'border-green-300', bg: 'bg-green-50', text: 'text-green-700', badge: 'bg-green-500', label: 'Ganando' };
+    }
+
+    function promedioColor(promedio) {
+      if (promedio === null) return 'gray';
+      if (promedio >= 4) return 'gold';
+      if (promedio >= 3) return 'green';
+      return 'red';
     }
 
     let gradesSessionId = null;
@@ -495,13 +521,32 @@
           return;
         }
 
+        // Promedio ponderado por créditos: Σ(nota_final · créditos) / créditos matriculados.
+        const creditosMatriculados = data.materias.reduce((acc, m) => acc + (m.creditos || 0), 0);
+        const promedio = creditosMatriculados > 0
+          ? data.materias.reduce((acc, m) => acc + (m.nota_definitiva ?? m.nota_acumulada) * (m.creditos || 0), 0) / creditosMatriculados
+          : null;
+        const pc = colorMeta(promedioColor(promedio));
+
+        const promedioHtml = `
+          <div class="border-2 ${pc.border} ${pc.bg} rounded-xl px-4 py-3 mb-3">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-sm font-semibold text-gray-800">Promedio del semestre</p>
+              <span class="flex-shrink-0 text-[10px] font-semibold text-white ${pc.badge} rounded-full px-2 py-0.5">${pc.label}</span>
+            </div>
+            <p class="text-2xl font-bold ${pc.text} mt-1">${promedio !== null ? promedio.toFixed(2) : '—'}</p>
+            ${creditosMatriculados > 0 ? `<p class="text-[11px] text-gray-400 mt-0.5">Ponderado por ${creditosMatriculados} créditos matriculados</p>` : ''}
+          </div>`;
+
         const materiasHtml = data.materias.map(m => {
-          const c = colorMeta(m.color);
+          const sinNotas = !m.porcentaje_evaluado;
+          const c = colorMeta(sinNotas ? 'gray' : m.color);
           const notaDef = m.nota_definitiva !== null ? m.nota_definitiva.toFixed(1) : '—';
+          const mensaje = sinNotas ? 'Aún no se han registrado evaluaciones para esta materia.' : m.mensaje;
           return `
             <div class="border ${c.border} ${c.bg} rounded-xl px-4 py-3">
               <div class="flex items-start justify-between gap-2">
-                <p class="text-sm font-semibold text-gray-800">${esc(m.nombre)}</p>
+                <p class="text-sm font-semibold text-gray-800">${esc(m.nombre)}${m.creditos ? ` <span class="text-gray-400 font-normal">· ${m.creditos} cr</span>` : ''}</p>
                 <span class="flex-shrink-0 text-[10px] font-semibold text-white ${c.badge} rounded-full px-2 py-0.5">${c.label}</span>
               </div>
               <div class="flex gap-4 mt-1.5 text-xs text-gray-600">
@@ -509,7 +554,7 @@
                 <span>Acumulada: <b>${m.nota_acumulada}</b></span>
                 <span>Definitiva: <b>${notaDef}</b></span>
               </div>
-              <p class="text-xs ${c.text} mt-1.5">${esc(m.mensaje)}</p>
+              <p class="text-xs ${c.text} mt-1.5">${esc(mensaje)}</p>
             </div>`;
         }).join('');
 
@@ -517,8 +562,11 @@
           <div class="text-xs text-gray-500 mb-2">
             <b>${esc(data.estudiante)}</b><br>${esc(data.programa)} · Semestre ${esc(data.semestre)}
           </div>
+          ${promedioHtml}
           ${materiasHtml}`;
         gradesSessionId = null;
+        academicContext.grades = data;
+        updateContextIndicators();
       } catch {
         content.innerHTML = gradesAnalyzeInstructionsHtml(`<p class="text-sm text-red-600 mt-3">No se pudo conectar con el servidor. Verifica que esté en ejecución.</p>`);
       }
@@ -547,7 +595,7 @@
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question, history: llmHistory })
+          body: JSON.stringify({ question, history: llmHistory, academic_context: academicContext })
         });
         const data = await res.json();
         hideTyping();

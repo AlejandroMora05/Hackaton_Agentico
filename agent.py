@@ -74,6 +74,7 @@ class AgentState(TypedDict):
     answer: str
     sources: List[str]
     grades_mode: bool
+    academic_context: Optional[dict]
 
 # ── 5. Detección de intención de notas ───────────────────────────────────────
 _GRADES_KEYWORDS = [
@@ -85,24 +86,48 @@ _GRADES_KEYWORDS = [
     "ver notas", "consultar notas", "mis notas",
 ]
 
+_NEXT_SEMESTER_KEYWORDS = [
+    "proximo semestre", "próximo semestre", "siguiente semestre",
+    "que puedo ver", "qué puedo ver", "que puedo matricular", "qué puedo matricular",
+    "que puedo cursar", "qué puedo cursar", "que puedo tomar", "qué puedo tomar",
+    "que puedo inscribir", "qué puedo inscribir", "materias disponibles",
+    "que materias quedan", "qué materias quedan", "que me falta", "qué me falta",
+    "que desbloqueo", "qué desbloqueo", "que se habilita", "qué se habilita",
+]
+
 def _is_grades_question(question: str) -> bool:
     q = question.lower()
     return any(kw in q for kw in _GRADES_KEYWORDS)
 
-def _route_intent(state: AgentState) -> str:
-    return "grades" if _is_grades_question(state["question"]) else "rag"
+def _is_next_semester_question(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in _NEXT_SEMESTER_KEYWORDS)
 
-# ── 6. Nodo de notas (Playwright) ─────────────────────────────────────────────
+def _route_intent(state: AgentState) -> str:
+    question = state["question"]
+    if _is_next_semester_question(question):
+        return "next_semester"
+    if _is_grades_question(question):
+        return "grades"
+    return "rag"
+
+# ── 6. Nodos de notas y pénsum (usan lo ya analizado desde la interfaz) ──────
 def _format_grades(report: dict) -> str:
+    materias = report.get("materias", [])
+    if not materias:
+        return (
+            "No encontré materias en curso este semestre en lo que ya analizaste. "
+            "Revisa que hayas hecho click en \"Ver mis notas\" y que se haya cargado correctamente."
+        )
     lines = [
         f"Aquí están tus notas, **{report.get('estudiante', '')}**:",
         f"*{report.get('programa', '')} — Semestre {report.get('semestre', '')}*",
         "",
     ]
-    for m in report.get("materias", []):
+    for m in materias:
         icon = {"green": "✅", "orange": "⚠️", "red": "❌"}.get(m.get("color"), "•")
         lines.append(f"{icon} **{m['nombre']}**")
-        lines.append(f"   {m['mensaje']}")
+        lines.append(f"   {m.get('mensaje', '')}")
         acum = m.get("nota_acumulada")
         pct = m.get("porcentaje_evaluado")
         if acum is not None:
@@ -112,20 +137,79 @@ def _format_grades(report: dict) -> str:
         lines.append("")
     return "\n".join(lines)
 
+def _materias_cursando_from_map(map_report: dict) -> list:
+    materias = []
+    for nivel in map_report.get("niveles", []):
+        materias.extend(m for m in nivel["materias"] if m.get("cursando"))
+    for grupo in map_report.get("electivas", []):
+        materias.extend(m for m in grupo["materias"] if m.get("cursando"))
+    return materias
+
+_NO_DATA_GRADES_MSG = (
+    "Todavía no he visto tus notas. Haz click en \"Ver mis notas\" o \"Ver mi mapa\" en el menú, "
+    "espera a que termine de analizar, y vuelve a preguntarme."
+)
+
 def get_grades(state: AgentState) -> AgentState:
-    """Abre el navegador, espera login y devuelve el reporte de notas."""
-    from scrapper.grades import get_grades_report, LoginTimeoutError
-    print(" Abriendo navegador para consultar notas...")
-    try:
-        report = get_grades_report()
-        answer = _format_grades(report)
-    except LoginTimeoutError:
+    """Responde con las notas ya analizadas desde la interfaz (no abre un
+    navegador nuevo: reutiliza lo que el estudiante ya cargó con los botones
+    "Ver mis notas" / "Ver mi mapa")."""
+    ctx = state.get("academic_context") or {}
+    grades_report = ctx.get("grades")
+    map_report = ctx.get("map")
+
+    if grades_report and grades_report.get("materias"):
+        answer = _format_grades(grades_report)
+    elif map_report and map_report.get("niveles"):
+        pseudo_report = {
+            "estudiante": map_report.get("estudiante", ""),
+            "programa": map_report.get("programa", ""),
+            "semestre": map_report.get("semestre", ""),
+            "materias": _materias_cursando_from_map(map_report),
+        }
+        answer = _format_grades(pseudo_report)
+    else:
+        answer = _NO_DATA_GRADES_MSG
+
+    return {**state, "answer": answer, "sources": [], "grades_mode": True}
+
+def next_semester(state: AgentState) -> AgentState:
+    """Estima qué materias quedarían habilitadas el próximo semestre, usando
+    el pénsum ya analizado desde "Ver mi mapa" (necesita el grafo de
+    prerrequisitos, que la vista de solo-notas no tiene)."""
+    ctx = state.get("academic_context") or {}
+    map_report = ctx.get("map")
+
+    if not map_report or not map_report.get("niveles"):
         answer = (
-            "⏱️ No completaste el inicio de sesión a tiempo. "
-            "Por favor intenta de nuevo y accede al portal antes de que pase el tiempo."
+            "Para decirte qué materias podrías ver el próximo semestre necesito tu pénsum. "
+            "Haz click en \"Ver mi mapa\", espera a que cargue, y vuelve a preguntarme."
         )
-    except Exception as e:
-        answer = f"Ocurrió un error al consultar tus notas: {e}"
+        return {**state, "answer": answer, "sources": [], "grades_mode": True}
+
+    from scrapper.map_data import materias_disponibles_proximo_semestre
+    resultado = materias_disponibles_proximo_semestre(map_report)
+
+    if resultado["advertencia"]:
+        answer = resultado["advertencia"]
+    elif not resultado["candidatas"]:
+        answer = (
+            "Con lo que ya tienes en curso, no encontré materias nuevas cuyos prerrequisitos "
+            "queden completamente cubiertos para el próximo semestre."
+        )
+    else:
+        candidatas = sorted(resultado["candidatas"], key=lambda c: (c["nivel"] or 999, c["nombre"]))
+        lines = [resultado["supuesto"], "", "Estas son las materias que ya tendrías habilitadas:", ""]
+        for c in candidatas:
+            lines.append(f"- **{c['nombre']}** ({c['creditos'] if c['creditos'] is not None else '—'} cr · nivel {c['nivel']})")
+        lines.append("")
+        lines.append(
+            "Esto no incluye electivas (no tienen un nivel fijo en el pénsum). Si ya aprobaste "
+            "alguna de estas o tienes materias pendientes de semestres anteriores que no se "
+            "reflejan aquí, dímelo y ajusto la lista."
+        )
+        answer = "\n".join(lines)
+
     return {**state, "answer": answer, "sources": [], "grades_mode": True}
 
 # ── 7. Nodos RAG ──────────────────────────────────────────────────────────────
@@ -184,12 +268,18 @@ def build_agent():
     graph = StateGraph(AgentState)
 
     graph.add_node("get_grades", get_grades)
+    graph.add_node("next_semester", next_semester)
     graph.add_node("rewrite_query", rewrite_query)
     graph.add_node("retrieve", retrieve)
     graph.add_node("generate", generate)
 
-    graph.add_conditional_edges(START, _route_intent, {"grades": "get_grades", "rag": "rewrite_query"})
+    graph.add_conditional_edges(START, _route_intent, {
+        "grades": "get_grades",
+        "next_semester": "next_semester",
+        "rag": "rewrite_query",
+    })
     graph.add_edge("get_grades", END)
+    graph.add_edge("next_semester", END)
     graph.add_edge("rewrite_query", "retrieve")
     graph.add_edge("retrieve", "generate")
     graph.add_edge("generate", END)
@@ -199,7 +289,7 @@ def build_agent():
 agent = build_agent()
 
 # ── 9. Función pública para usar desde la interfaz ───────────────────────────
-def ask(question: str, history: list = None) -> dict:
+def ask(question: str, history: list = None, academic_context: dict = None) -> dict:
     result = agent.invoke({
         "question": question,
         "search_query": "",
@@ -208,6 +298,7 @@ def ask(question: str, history: list = None) -> dict:
         "answer": "",
         "sources": [],
         "grades_mode": False,
+        "academic_context": academic_context,
     })
     return {
         "answer": result["answer"],

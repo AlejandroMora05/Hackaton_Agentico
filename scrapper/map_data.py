@@ -102,6 +102,81 @@ def get_map_report(timeout_seconds: int = LOGIN_WAIT_SECONDS) -> Dict:
     return build_map_report(html["pensum_html"], html["notas_html"])
 
 
+def materias_disponibles_proximo_semestre(report: Dict) -> Dict:
+    """Estima qué materias quedarían habilitadas (todos sus prerrequisitos
+    cumplidos) el próximo semestre, a partir de un reporte de build_map_report.
+
+    El scraper no expone el historial de materias aprobadas en semestres
+    anteriores (la página de pénsum solo nos deja ver el estado de ESTE
+    semestre), así que se asume:
+      - todo lo de niveles estrictamente anteriores al nivel más bajo que el
+        estudiante está cursando ahora ya está aprobado;
+      - las materias que cursa este semestre las va a aprobar.
+    Esa suposición se devuelve explícita en "supuesto" para que quien la lea
+    pueda corregirla mentalmente si tiene materias pendientes de antes.
+    """
+    niveles = report.get("niveles", [])
+
+    cursando_codigos = {
+        m["codigo"]
+        for nivel in niveles
+        for m in nivel["materias"]
+        if m.get("cursando") and m.get("codigo")
+    }
+
+    niveles_con_cursando = [
+        nivel["nivel"] for nivel in niveles
+        if nivel.get("nivel") is not None and any(m.get("cursando") for m in nivel["materias"])
+    ]
+
+    if not niveles_con_cursando:
+        return {
+            "supuesto": None,
+            "candidatas": [],
+            "advertencia": (
+                "No detecté materias en curso este semestre en tu pénsum, así que no "
+                "pude estimar qué quedaría disponible para el próximo."
+            ),
+        }
+
+    nivel_minimo_cursando = min(niveles_con_cursando)
+
+    supuestas_aprobadas = {
+        m["codigo"]
+        for nivel in niveles
+        if nivel.get("nivel") is not None and nivel["nivel"] < nivel_minimo_cursando
+        for m in nivel["materias"]
+        if m.get("codigo")
+    }
+
+    satisfechas = supuestas_aprobadas | cursando_codigos
+    ya_contadas = supuestas_aprobadas | cursando_codigos
+
+    candidatas = []
+    for nivel in niveles:
+        for m in nivel["materias"]:
+            codigo = m.get("codigo")
+            if not codigo or codigo in ya_contadas:
+                continue
+            prereqs = set(m.get("prerequisitos") or [])
+            if prereqs <= satisfechas:
+                candidatas.append({
+                    "codigo": codigo,
+                    "nombre": m["nombre"],
+                    "creditos": m.get("creditos"),
+                    "nivel": nivel.get("nivel"),
+                })
+
+    return {
+        "supuesto": (
+            f"Asumiendo que ya aprobaste todas las materias de niveles anteriores al "
+            f"nivel {nivel_minimo_cursando} y que apruebas las que cursas este semestre."
+        ),
+        "candidatas": candidatas,
+        "advertencia": None,
+    }
+
+
 if __name__ == "__main__":
     import json
 

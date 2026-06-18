@@ -40,7 +40,7 @@ from playwright.async_api import Browser, BrowserContext, Page, Playwright, asyn
 
 from scrapper.grades import NOTAS_URL, parse_grades_html
 from scrapper.map_data import build_map_report
-from scrapper.pensum import PENSUM_READY_MARKER, PENSUM_URL
+from scrapper.pensum import PENSUM_READY_MARKER, PENSUM_URL, parse_pensum_html
 
 LOGIN_URL = "https://www.udea.edu.co/wps/portal/udea/web/inicio/login"
 NOTAS_READY_MARKER = "MATERIAS QUE ESTAS CURSANDO"
@@ -213,11 +213,40 @@ async def _persist_and_close(session_id: str, session: _Session) -> None:
     await _close_session(session_id)
 
 
+async def _fetch_creditos_by_codigo(session: _Session) -> Dict[str, Optional[int]]:
+    """Consulta el pénsum (misma sesión SSO, sin pedirle nada al estudiante)
+    solo para conocer los créditos de cada materia: la página de notas no
+    los incluye, y el promedio ponderado los necesita."""
+    try:
+        await session.page.goto(PENSUM_URL, wait_until="domcontentloaded")
+        pensum_html = await session.page.content()
+    except Exception:
+        return {}
+
+    if PENSUM_READY_MARKER not in pensum_html.upper():
+        return {}
+
+    pensum = parse_pensum_html(pensum_html)
+    creditos_por_codigo: Dict[str, Optional[int]] = {}
+    for nivel in pensum["niveles"]:
+        for materia in nivel["materias"]:
+            creditos_por_codigo[materia["codigo"]] = materia["creditos"]
+    for grupo in pensum["electivas"]:
+        for materia in grupo["materias"]:
+            creditos_por_codigo[materia["codigo"]] = materia["creditos"]
+    return creditos_por_codigo
+
+
 async def analyze_notas(session_id: str) -> Dict:
     session = await _check_session(session_id)
     notas_html = await _capture_target_html(session, "notas")
+    creditos_por_codigo = await _fetch_creditos_by_codigo(session)
     await _persist_and_close(session_id, session)
-    return parse_grades_html(notas_html)
+
+    report = parse_grades_html(notas_html)
+    for materia in report["materias"]:
+        materia["creditos"] = creditos_por_codigo.get(materia["codigo"])
+    return report
 
 
 async def analyze_map(session_id: str) -> Dict:
