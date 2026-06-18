@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Copiloto UdeA</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { font-family: 'Inter', sans-serif; }
+
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #bbf0d0; border-radius: 99px; }
+
+    .chat-bg {
+      background-color: #f4fbf7;
+      background-image: radial-gradient(#00783a12 1px, transparent 1px);
+      background-size: 22px 22px;
+    }
+
+    .typing-dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #00783A;
+      animation: bounce 1.3s infinite ease-in-out;
+    }
+    .typing-dot:nth-child(2) { animation-delay: .18s; }
+    .typing-dot:nth-child(3) { animation-delay: .36s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: .35; }
+      30%            { transform: translateY(-8px); opacity: 1; }
+    }
+
+    .msg-in  { animation: slideLeft  .25s ease-out; }
+    .msg-out { animation: slideRight .25s ease-out; }
+    @keyframes slideLeft  { from { opacity:0; transform:translateX(-12px); } to { opacity:1; transform:translateX(0); } }
+    @keyframes slideRight { from { opacity:0; transform:translateX( 12px); } to { opacity:1; transform:translateX(0); } }
+
+    .bot-content p  { margin-bottom:.45rem; }
+    .bot-content ul { list-style:disc;    padding-left:1.4rem; margin-bottom:.45rem; }
+    .bot-content ol { list-style:decimal; padding-left:1.4rem; margin-bottom:.45rem; }
+    .bot-content strong { font-weight:600; }
+    .bot-content code { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:4px; padding:1px 5px; font-size:.8em; }
+    .bot-content blockquote { border-left:3px solid #00783A; padding-left:.75rem; color:#555; margin:.5rem 0; }
+
+    textarea { field-sizing: content; max-height: 120px; }
+  </style>
+</head>
+<body class="h-screen flex overflow-hidden bg-white">
+
+  <!-- ── Sidebar ── -->
+  <aside class="hidden md:flex flex-col w-64 bg-[#00783A] text-white flex-shrink-0">
+    <div class="px-5 pt-6 pb-4 border-b border-green-700">
+      <div class="flex items-center gap-3 mb-1">
+        <div class="w-9 h-9 bg-white rounded-xl flex items-center justify-center flex-shrink-0">
+          <span class="text-[#00783A] font-bold text-base">U</span>
+        </div>
+        <div>
+          <p class="font-semibold text-sm leading-tight">Copiloto UdeA</p>
+          <p class="text-green-300 text-xs">Asistente académico</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex-1 px-4 py-5 overflow-y-auto">
+      <p class="text-green-300 text-xs font-semibold uppercase tracking-wider mb-3">Preguntas frecuentes</p>
+      <div class="space-y-1.5">
+        <button onclick="useSuggestion(this)" class="w-full text-left text-xs text-green-100 hover:text-white hover:bg-green-700 rounded-lg px-3 py-2 transition-colors">
+          ¿Causales de pérdida de calidad de estudiante?
+        </button>
+        <button onclick="useSuggestion(this)" class="w-full text-left text-xs text-green-100 hover:text-white hover:bg-green-700 rounded-lg px-3 py-2 transition-colors">
+          ¿Cómo funciona el proceso de matrícula?
+        </button>
+        <button onclick="useSuggestion(this)" class="w-full text-left text-xs text-green-100 hover:text-white hover:bg-green-700 rounded-lg px-3 py-2 transition-colors">
+          ¿Cuántas veces puedo cancelar un curso?
+        </button>
+        <button onclick="useSuggestion(this)" class="w-full text-left text-xs text-green-100 hover:text-white hover:bg-green-700 rounded-lg px-3 py-2 transition-colors">
+          ¿Qué es el rendimiento académico insuficiente?
+        </button>
+        <button onclick="useSuggestion(this)" class="w-full text-left text-xs text-green-100 hover:text-white hover:bg-green-700 rounded-lg px-3 py-2 transition-colors">
+          ¿Cuáles son mis derechos como estudiante?
+        </button>
+        <button onclick="useSuggestion(this)" class="w-full text-left text-xs text-green-100 hover:text-white hover:bg-green-700 rounded-lg px-3 py-2 transition-colors">
+          ¿Qué sanciones disciplinarias existen?
+        </button>
+      </div>
+    </div>
+
+    <div class="px-4 pb-5">
+      <button onclick="clearChat()" class="w-full flex items-center justify-center gap-2 text-xs text-green-300 hover:text-white border border-green-700 hover:border-green-500 rounded-lg px-3 py-2 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        Nueva conversación
+      </button>
+      <p class="text-green-600 text-[10px] text-center mt-4">Basado en normativa oficial UdeA</p>
+    </div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <div class="flex flex-col flex-1 min-w-0">
+
+    <!-- Header móvil -->
+    <header class="md:hidden flex items-center justify-between bg-[#00783A] text-white px-4 py-3 flex-shrink-0 shadow">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 bg-white rounded-lg flex items-center justify-center">
+          <span class="text-[#00783A] font-bold text-xs">U</span>
+        </div>
+        <span class="font-semibold text-sm">Copiloto UdeA</span>
+      </div>
+      <button onclick="clearChat()" class="text-green-300 hover:text-white transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Chat -->
+    <main id="chat" class="flex-1 overflow-y-auto chat-bg px-4 py-6 space-y-4">
+
+      <!-- Welcome -->
+      <div id="welcome" class="flex flex-col items-center justify-center min-h-[60%] gap-6">
+        <div class="bg-white rounded-2xl shadow-sm border border-green-100 p-7 max-w-sm w-full text-center">
+          <div class="w-14 h-14 bg-green-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <svg class="w-7 h-7 text-[#00783A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+            </svg>
+          </div>
+          <h2 class="font-semibold text-gray-800 text-base mb-1.5">¡Hola! Soy tu copiloto UdeA</h2>
+          <p class="text-gray-500 text-sm leading-relaxed">Consulta el reglamento estudiantil y los procesos de matrícula de la Universidad de Antioquia.</p>
+        </div>
+
+        <!-- Sugerencias móvil -->
+        <div class="md:hidden flex flex-col gap-2 w-full max-w-sm">
+          <button onclick="useSuggestion(this)" class="text-left text-sm text-[#00783A] bg-white border border-green-200 rounded-xl px-4 py-2.5 hover:bg-green-50 transition-colors shadow-sm">
+            ¿Causales de pérdida de calidad de estudiante?
+          </button>
+          <button onclick="useSuggestion(this)" class="text-left text-sm text-[#00783A] bg-white border border-green-200 rounded-xl px-4 py-2.5 hover:bg-green-50 transition-colors shadow-sm">
+            ¿Cuántas veces puedo cancelar un curso?
+          </button>
+          <button onclick="useSuggestion(this)" class="text-left text-sm text-[#00783A] bg-white border border-green-200 rounded-xl px-4 py-2.5 hover:bg-green-50 transition-colors shadow-sm">
+            ¿Qué derechos tengo como estudiante?
+          </button>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Input -->
+    <div class="flex-shrink-0 bg-white border-t border-gray-100 px-4 py-3.5 shadow-[0_-1px_8px_rgba(0,0,0,0.06)]">
+      <div class="max-w-2xl mx-auto flex gap-3 items-end">
+        <div class="flex-1 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5
+                    focus-within:border-[#00783A] focus-within:bg-white focus-within:ring-2 focus-within:ring-green-100
+                    transition-all">
+          <textarea
+            id="input"
+            rows="1"
+            placeholder="Escribe tu pregunta sobre el reglamento…"
+            class="w-full bg-transparent text-gray-800 placeholder-gray-400 resize-none outline-none text-sm leading-relaxed"
+            onkeydown="handleKey(event)"
+          ></textarea>
+        </div>
+        <button
+          id="sendBtn"
+          onclick="sendMessage()"
+          class="bg-[#00783A] hover:bg-[#005f2d] disabled:opacity-50 disabled:cursor-not-allowed
+                 text-white rounded-2xl p-3 transition-all shadow-md hover:shadow-lg active:scale-95 flex-shrink-0"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
+        </button>
+      </div>
+      <p class="text-gray-400 text-[11px] text-center mt-2">
+        Enter para enviar · Shift+Enter para nueva línea
+      </p>
+    </div>
+  </div>
+
+  <script>
+    let llmHistory = [];
+
+    marked.setOptions({ breaks: true, gfm: true });
+
+    function handleKey(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    }
+
+    function useSuggestion(btn) {
+      document.getElementById('input').value = btn.textContent.trim();
+      sendMessage();
+    }
+
+    function clearChat() {
+      llmHistory = [];
+      const chat = document.getElementById('chat');
+      chat.innerHTML = '';
+      location.reload();
+    }
+
+    function hideWelcome() {
+      const w = document.getElementById('welcome');
+      if (w) { w.style.display = 'none'; }
+    }
+
+    function addUserMsg(text) {
+      hideWelcome();
+      appendToChat(`
+        <div class="flex justify-end msg-out">
+          <div class="max-w-[78%] bg-[#00783A] text-white rounded-2xl rounded-tr-md px-4 py-2.5 shadow-sm">
+            <p class="text-sm leading-relaxed whitespace-pre-wrap">${esc(text)}</p>
+          </div>
+        </div>
+      `);
+    }
+
+    function showTyping() {
+      appendToChat(`
+        <div class="flex justify-start msg-in" id="typing">
+          <div class="bg-white border border-gray-100 rounded-2xl rounded-tl-md px-4 py-3 shadow-sm flex items-center gap-1.5">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+          </div>
+        </div>
+      `);
+    }
+
+    function hideTyping() {
+      document.getElementById('typing')?.remove();
+    }
+
+    function addBotMsg(answer, sources, usedWeb) {
+      const srcHtml = sources?.length ? `
+        <div class="mt-3 pt-2.5 border-t border-gray-100">
+          <button
+            onclick="this.nextElementSibling.classList.toggle('hidden')"
+            class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#00783A] transition-colors group">
+            <svg class="w-3.5 h-3.5 group-hover:text-[#00783A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            <span>${sources.length} fuente${sources.length > 1 ? 's' : ''} consultada${sources.length > 1 ? 's' : ''}${usedWeb ? ' · incluye web' : ''}</span>
+          </button>
+          <div class="hidden mt-2 space-y-1">
+            ${sources.map(s => `
+              <div class="flex items-start gap-2 bg-green-50 rounded-lg px-3 py-1.5">
+                <svg class="w-3 h-3 text-[#00783A] flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z"/>
+                </svg>
+                <span class="text-[11px] text-gray-600 break-all">${esc(s)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : '';
+
+      appendToChat(`
+        <div class="flex justify-start msg-in">
+          <div class="max-w-[82%] bg-white border border-gray-100 rounded-2xl rounded-tl-md px-4 py-3 shadow-sm">
+            <div class="bot-content text-sm text-gray-800 leading-relaxed">${marked.parse(answer)}</div>
+            ${srcHtml}
+          </div>
+        </div>
+      `);
+    }
+
+    function appendToChat(html) {
+      const chat = document.getElementById('chat');
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      chat.appendChild(div.firstElementChild);
+      setTimeout(() => chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' }), 40);
+    }
+
+    function esc(t) {
+      return String(t)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    async function sendMessage() {
+      const input   = document.getElementById('input');
+      const sendBtn = document.getElementById('sendBtn');
+      const question = input.value.trim();
+      if (!question || sendBtn.disabled) return;
+
+      input.value = '';
+      input.style.height = 'auto';
+      sendBtn.disabled = true;
+
+      addUserMsg(question);
+      showTyping();
+
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, history: llmHistory })
+        });
+        const data = await res.json();
+        hideTyping();
+        addBotMsg(data.answer, data.sources, data.used_web);
+
+        llmHistory.push({ role: 'user',      content: question    });
+        llmHistory.push({ role: 'assistant', content: data.answer });
+        if (llmHistory.length > 6) llmHistory = llmHistory.slice(-6);
+
+      } catch {
+        hideTyping();
+        addBotMsg('No se pudo conectar con el servidor. Verifica que esté en ejecución.', [], false);
+      }
+
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  </script>
+</body>
+</html>
