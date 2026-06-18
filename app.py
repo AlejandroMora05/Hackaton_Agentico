@@ -16,7 +16,8 @@ def responder(pregunta: str, historial: list):
 **Fuentes consultadas:**
 {fuentes_md}"""
 
-    historial.append((pregunta, respuesta_completa))
+    historial.append({"role": "user", "content": pregunta})
+    historial.append({"role": "assistant", "content": respuesta_completa})
     return historial, ""
 
 # ── Preguntas de ejemplo ──────────────────────────────────────────────────────
@@ -46,8 +47,6 @@ with gr.Blocks(
     chatbot = gr.Chatbot(
         label="Conversación",
         height=450,
-        
-        
         avatar_images=(None, "https://www.udea.edu.co/favicon.ico")
     )
 
