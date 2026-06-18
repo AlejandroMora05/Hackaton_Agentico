@@ -2,12 +2,14 @@
 import gradio as gr
 from agent import ask
 
-# ── Función que conecta la UI con el agente ───────────────────────────────────
-def responder(pregunta: str, historial: list):
-    if not pregunta.strip():
-        return historial, ""
+HISTORY_LIMIT = 6  # últimos 3 intercambios (user + assistant × 3)
 
-    result = ask(pregunta)
+# ── Función que conecta la UI con el agente ───────────────────────────────────
+def responder(pregunta: str, historial: list, llm_history: list):
+    if not pregunta.strip():
+        return historial, "", llm_history
+
+    result = ask(pregunta, llm_history)
 
     fuentes_md = "\n".join([f"- {s}" for s in result["sources"]])
     respuesta_completa = f"""{result['answer']}
@@ -18,7 +20,14 @@ def responder(pregunta: str, historial: list):
 
     historial.append({"role": "user", "content": pregunta})
     historial.append({"role": "assistant", "content": respuesta_completa})
-    return historial, ""
+
+    llm_history = llm_history + [
+        {"role": "user", "content": pregunta},
+        {"role": "assistant", "content": result["answer"]}
+    ]
+    llm_history = llm_history[-HISTORY_LIMIT:]
+
+    return historial, "", llm_history
 
 # ── Preguntas de ejemplo ──────────────────────────────────────────────────────
 EJEMPLOS = [
@@ -77,17 +86,18 @@ with gr.Blocks(
 
     # Estado del historial
     estado = gr.State([])
+    llm_estado = gr.State([])
 
     # Eventos
     btn_enviar.click(
         fn=responder,
-        inputs=[txt_input, estado],
-        outputs=[chatbot, txt_input]
+        inputs=[txt_input, estado, llm_estado],
+        outputs=[chatbot, txt_input, llm_estado]
     )
     txt_input.submit(
         fn=responder,
-        inputs=[txt_input, estado],
-        outputs=[chatbot, txt_input]
+        inputs=[txt_input, estado, llm_estado],
+        outputs=[chatbot, txt_input, llm_estado]
     )
 
 if __name__ == "__main__":

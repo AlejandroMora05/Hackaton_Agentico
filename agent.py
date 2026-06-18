@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.graph import StateGraph, START, END
 from typing import TypedDict, List
 from llm_factory import get_llm
@@ -35,6 +35,7 @@ Reglas:
 - Si la información no está en los fragmentos, di exactamente:
   "No encontré información sobre eso en el reglamento de la UdeA."
 - Nunca inventes información.
+- Usa el historial de conversación para dar respuestas coherentes y no repetir saludos.
 
 Contexto del reglamento:
 {context}
@@ -42,12 +43,14 @@ Contexto del reglamento:
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
+    MessagesPlaceholder(variable_name="history"),
     ("human", "{question}")
 ])
 
 # ── 4. Estado del grafo ───────────────────────────────────────────────────────
 class AgentState(TypedDict):
     question: str
+    history: List[dict]
     context: str
     answer: str
     sources: List[str]
@@ -69,10 +72,18 @@ def retrieve(state: AgentState) -> AgentState:
 def generate(state: AgentState) -> AgentState:
     """Genera la respuesta con el LLM usando el contexto recuperado."""
     print(" Generando respuesta...")
+    history_messages = []
+    for msg in state["history"]:
+        if msg["role"] == "user":
+            history_messages.append(HumanMessage(content=msg["content"]))
+        else:
+            history_messages.append(AIMessage(content=msg["content"]))
+
     chain = prompt | llm
     response = chain.invoke({
         "context": state["context"],
-        "question": state["question"]
+        "question": state["question"],
+        "history": history_messages
     })
     return {**state, "answer": response.content}
 
@@ -92,8 +103,14 @@ def build_agent():
 agent = build_agent()
 
 # ── 7. Función pública para usar desde la interfaz ───────────────────────────
-def ask(question: str) -> dict:
-    result = agent.invoke({"question": question, "context": "", "answer": "", "sources": []})
+def ask(question: str, history: list = None) -> dict:
+    result = agent.invoke({
+        "question": question,
+        "history": history or [],
+        "context": "",
+        "answer": "",
+        "sources": []
+    })
     return {
         "answer": result["answer"],
         "sources": result["sources"]
